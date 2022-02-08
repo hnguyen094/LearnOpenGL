@@ -1,6 +1,6 @@
 add_executable(LearnOpenGL
   main.cpp
-  glad.c)
+  glad.cpp)
 
 target_compile_features(LearnOpenGL PRIVATE cxx_std_17)
 target_link_libraries(LearnOpenGL PRIVATE glfw glm)
