@@ -7,23 +7,10 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include "assrt.h"
+#include "shader.h"
+
 bool verbose = true;
-
-const char* vertex_shader_source = 
-    "#version 330 core\n"
-    "layout (location = 0) in vec3 pos;\n"
-    "void main()\n"
-    "{\n"
-    "    gl_Position = vec4(pos.x, pos.y, pos.z, 1.0);\n"
-    "}\0";
-
-const char* fragment_shader_source =
-    "#version 330 core\n"
-    "out vec4 frag_color;\n"
-    "void main()\n"
-    "{\n"
-    "    frag_color = vec4(1.0f, 0.5f, 0.2f, 1.0f);\n"
-    "}\n";
 
 static void gl_debug_messenger([[maybe_unused]] GLenum source, GLenum type,
     [[maybe_unused]] GLuint id, GLenum severity,
@@ -91,72 +78,59 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     if (verbose) printf("GLFW: Resized to : (%d, %d)\n", width, height); 
 }
 
-bool wireframe;
-int last_state;
-void process_input(GLFWwindow* window) {
-    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+struct input_frame {
+    int space;
+    bool wireframe;
+};
+
+void process_input(GLFWwindow* window, input_frame* last_frame) {
+    auto new_frame = (input_frame) {
+        .space = glfwGetKey(window, GLFW_KEY_SPACE),
+        .wireframe = last_frame->wireframe
+    };
+
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS || 
+            glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, true);
-    } else if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && last_state != GLFW_PRESS) {
-        wireframe = !wireframe;
-        int key = wireframe ? GL_LINE : GL_FILL;
+    } 
+
+    if (new_frame.space == GLFW_PRESS && 
+            last_frame->space == GLFW_RELEASE) {
+        new_frame.wireframe = !last_frame->wireframe;
+        int key = new_frame.wireframe ? GL_LINE : GL_FILL;
         glPolygonMode(GL_FRONT_AND_BACK, key);
     }
-    last_state = glfwGetKey(window, GLFW_KEY_SPACE);
+    *last_frame = new_frame; 
 }
 
-void assrt(bool pass_condition, const char* fail_message) {
-    if (pass_condition) return;
-    printf("[LearnOpenGL] {%s}\n", fail_message);
+void set_color(GLuint shader_program) {
+    auto time = glfwGetTime();
+    auto r = (sin(time * 2) / 2.f) + 0.5f;
+    auto g = (sin(time) / 2.f) + 0.5f;
+    auto b = (sin(time / 2) / 2.f) + 0.5f;
+    auto vert_location = glGetUniformLocation(shader_program, "prog_color");
+    glUniform4f(vert_location, r, g, b, 1.0f);
 }
 
-GLuint compile_shader(GLenum shader_type, const char* source) {
-    auto shader = glCreateShader(shader_type);
-    glShaderSource(shader, 1, &source, NULL);
-    glCompileShader(shader);
-
-    int success;
-    char log[512];
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        glGetShaderInfoLog(shader, 512, NULL, log);
-        std::cout << "Shader compilation failed\n" << log << std::endl;
-    }
-    return success ? shader : 0;
-}
-
-GLuint create_link_shader_program(GLuint vert_shader, GLuint frag_shader) {
-    unsigned int shader_program;
-    shader_program = glCreateProgram();
-    glAttachShader(shader_program, vert_shader);
-    glAttachShader(shader_program, frag_shader);
-    glLinkProgram(shader_program);
-
-    int success;
-    char log[512];
-    glGetProgramiv(shader_program, GL_LINK_STATUS, &success);
-    if (!success) {
-        glGetProgramInfoLog(shader_program, 512, NULL, log);
-    }
-    return success ? shader_program : 0;
-}
-
-void render(GLFWwindow* window, GLuint shader_program, GLuint vao) {
+void render(GLFWwindow* window, Shader* shader, GLuint vao) {
     glClearColor(1.0, 0.0, 1.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    glUseProgram(shader_program);
     glBindVertexArray(vao);
+    shader->use();
+    // set_color(shader_program);
     // glDrawArrays(GL_TRIANGLES, 0, 3);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
     glfwSwapBuffers(window);
 }
 
-void render_init(GLFWwindow* window, GLuint &shader_program, GLuint &vao) {
+void render_init(GLFWwindow* window, Shader* shader, GLuint &vao) {
     float vertices[] = {
-        -0.5f, -0.5f, 0.0f,
-         0.5f, -0.5f, 0.0f,
-        -0.5f,  0.5f, 0.0f,
-         0.5f,  0.5f, 0.0f,
+        // positions          // colors
+        -0.5f, -0.5f, 0.0f,   1.f, 0.f, 0.f,
+         0.5f, -0.5f, 0.0f,   0.f, 1.f, 0.f,
+        -0.5f,  0.5f, 0.0f,   0.f, 0.f, 1.f,
+         0.5f,  0.5f, 0.0f,   1.f, 1.f, 1.f
     };
     unsigned int indices[] = {
         0, 3, 2,
@@ -174,26 +148,24 @@ void render_init(GLFWwindow* window, GLuint &shader_program, GLuint &vao) {
     unsigned int vbo; // vertex buffer object
     glGenBuffers(1, &vbo);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-    
-    auto vert_shader = compile_shader(GL_VERTEX_SHADER, vertex_shader_source);
-    assrt(vert_shader, "Failed to compile vertex shader.");
-    auto frag_shader = compile_shader(GL_FRAGMENT_SHADER, fragment_shader_source);
-    assrt(frag_shader, "Failed to compile fragment shader.");
-    shader_program = create_link_shader_program(vert_shader, frag_shader);
-    assrt(shader_program, "Failed to link shaders to shader program.");
-    glDeleteShader(vert_shader);
-    glDeleteShader(frag_shader);
-    
+   
+    shader->configure("shaders/shader.vs", "shaders/shader.fs");
+    if (verbose) printf("Using shader {%d}\n", shader->ID);
+   
     // intepret the vertex data (per vertex attribute)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
 
+    if (verbose) {
+        int nr_attributes;
+        glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &nr_attributes);
+        printf("Maximum # of vertex attributes supported: {%d}\n", nr_attributes);
+    }
 }
-
 int main() {
-	  printf("Hello, World!\n");
 
     // init window
     glfwInit();
@@ -216,13 +188,23 @@ int main() {
         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
     }
 
-    unsigned int shader_program, vao;
-    render_init(window, shader_program, vao);
+    Shader shader;
+    unsigned int vao;
+    render_init(window, &shader, vao);
+
+    auto frame = (input_frame) {
+        .space = 0,
+        .wireframe = false
+    };
 
     while (!glfwWindowShouldClose(window)) { // render loop
-        process_input(window);
-        render(window, shader_program, vao);
+        process_input(window, &frame);
+        render(window, &shader, vao);
         glfwPollEvents();
+        auto error = glGetError();
+        if (error) {
+            //printf("%d\n", error);
+        }
     }
     glfwTerminate();
     return 0;
