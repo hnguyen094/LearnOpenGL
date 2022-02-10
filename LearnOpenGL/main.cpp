@@ -165,8 +165,8 @@ void render_init(GLFWwindow* window, Shader* shader, GLuint &vao) {
         printf("Maximum # of vertex attributes supported: {%d}\n", nr_attributes);
     }
 }
-int main() {
 
+int main() {
     // init window
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);

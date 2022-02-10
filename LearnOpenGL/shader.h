@@ -80,11 +80,12 @@ class Shader {
             assrt(vert_shader, "Failed to compile vertex shader.");
             auto frag_shader = compile_shader(GL_FRAGMENT_SHADER, f_shader_code);
             assrt(frag_shader, "Failed to compile fragment shader.");
-            glDeleteShader(vert_shader);
-            glDeleteShader(frag_shader);
 
             ID = create_link_shader_program(vert_shader, frag_shader);
             assrt(ID, "Failed to link shaders to shader program.");
+            
+            glDeleteShader(vert_shader);
+            glDeleteShader(frag_shader);
         }
         
         void use() {
