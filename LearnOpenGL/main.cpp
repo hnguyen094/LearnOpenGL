@@ -8,6 +8,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "assrt.h"
+#include "glm/fwd.hpp"
 #include "shader.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -19,6 +20,23 @@ const char* vert_path = "data/shaders/shader.vert";
 const char* frag_path = "data/shaders/shader.frag";
 const char* image_path = "data/images/container.jpeg";
 const char* image2_path = "data/images/awesomeface.png";
+
+struct program_state {
+    bool wireframe;
+    bool perspective;
+
+    float width;
+    float height;
+    glm::vec3 world_offset;
+};
+
+program_state state = (program_state) {
+    .perspective = true,
+    .wireframe = false,
+    .width = 800,
+    .height = 800,
+    .world_offset = glm::vec3(0.f, 0.f, -0.3f),
+};
 
 static void gl_debug_messenger([[maybe_unused]] GLenum source, GLenum type,
         [[maybe_unused]] GLuint id, GLenum severity,
@@ -82,32 +100,73 @@ static void gl_debug_messenger([[maybe_unused]] GLenum source, GLenum type,
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
+    state.height = height;
+    state.width = width;
     glViewport(0, 0, width, height);
     if (verbose) printf("GLFW: Resized to : (%d, %d)\n", width, height); 
 }
 
 struct input_frame {
     int space;
-    bool wireframe;
+    int p;
+    int w,a,s,d,q,e;
 };
+
+
+void verbose_toggle(const char* var_name, bool var_value) {
+    if (verbose) printf("%s: {%s}\n", var_name, (var_value ? "ON" : "OFF"));
+}
 
 void process_input(GLFWwindow* window, input_frame* last_frame) {
     auto new_frame = (input_frame) {
         .space = glfwGetKey(window, GLFW_KEY_SPACE),
-        .wireframe = last_frame->wireframe
+        .p = glfwGetKey(window, GLFW_KEY_P),
+        .w = glfwGetKey(window, GLFW_KEY_W),
+        .a = glfwGetKey(window, GLFW_KEY_A),
+        .s = glfwGetKey(window, GLFW_KEY_S),
+        .d = glfwGetKey(window, GLFW_KEY_D),
+        .q = glfwGetKey(window, GLFW_KEY_Q),
+        .e = glfwGetKey(window, GLFW_KEY_E),
     };
 
-    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS || 
-            glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) { 
         glfwSetWindowShouldClose(window, true);
     } 
 
     if (new_frame.space == GLFW_PRESS && 
             last_frame->space == GLFW_RELEASE) {
-        new_frame.wireframe = !last_frame->wireframe;
-        int key = new_frame.wireframe ? GL_LINE : GL_FILL;
+        state.wireframe = !state.wireframe;
+        int key = state.wireframe ? GL_LINE : GL_FILL;
         glPolygonMode(GL_FRONT_AND_BACK, key);
+        verbose_toggle("Wireframe", state.wireframe);
     }
+
+    if (new_frame.p == GLFW_PRESS &&
+            last_frame->p == GLFW_RELEASE) {
+        state.perspective = !state.perspective;
+        // effect happens next frame in render_loop
+        verbose_toggle("Perspective", state.perspective);
+    }
+
+    if (new_frame.w == GLFW_PRESS) {
+        state.world_offset = state.world_offset + glm::vec3(0, 0, 0.1f);
+    }
+    if (new_frame.a == GLFW_PRESS) {
+        state.world_offset = state.world_offset + glm::vec3(0.1f, 0, 0);
+    }
+    if (new_frame.s == GLFW_PRESS) {
+        state.world_offset = state.world_offset + glm::vec3(0, 0, -0.1f);
+    }
+    if (new_frame.d == GLFW_PRESS) {
+        state.world_offset = state.world_offset + glm::vec3(-0.1f, 0, 0);
+    }
+    if (new_frame.q == GLFW_PRESS) {
+        state.world_offset = state.world_offset + glm::vec3(0, 0.1f, 0);
+    }
+    if (new_frame.e == GLFW_PRESS) {
+        state.world_offset = state.world_offset + glm::vec3(0, -0.1f, 0);
+    }
+
     *last_frame = new_frame; 
 }
 
@@ -119,14 +178,55 @@ void update_color(Shader* shader, float time) {
     glUniform4f(vert_location, r, g, b, 1.0f);
 }
 
-void update_transform(Shader* shader, float time) {
+void update_transform_fun(Shader* shader, float time) {
     glm::mat4 trs = glm::mat4(1.f);
     trs = glm::rotate(trs, glm::radians(time * 200), glm::vec3(0.f, 1.f, 0.f));
     auto scale = sin(time) / 3.f + 0.5f;
     trs = glm::scale(trs, glm::vec3(scale, scale, scale));
     
     unsigned int trs_location = glGetUniformLocation(shader->ID, "trs");
-    glad_glUniformMatrix4fv(trs_location, 1, GL_FALSE, glm::value_ptr(trs));
+    glUniformMatrix4fv(trs_location, 1, GL_FALSE, glm::value_ptr(trs));
+}
+
+void update_draw_transform(Shader* shader, float time) {
+    glm::vec3 cube_positions[] = {
+        glm::vec3( 0.0f,  0.0f,  0.0f ), 
+        glm::vec3( 2.0f,  5.0f, -15.0f ), 
+        glm::vec3(-1.5f, -2.2f, -2.5f),  
+        glm::vec3(-3.8f, -2.0f, -12.3f),  
+        glm::vec3( 2.4f, -0.4f, -3.5f ),  
+        glm::vec3(-1.7f,  3.0f, -7.5f),  
+        glm::vec3( 1.3f, -2.0f, -2.5f ),  
+        glm::vec3( 1.5f,  2.0f, -2.5f ), 
+        glm::vec3( 1.5f,  0.2f, -1.5f ), 
+        glm::vec3(-1.3f,  1.0f, -1.5f)  
+    };
+
+    glm::mat4 view = glm::mat4(1.0f);
+    view = glm::translate(view, state.world_offset); 
+    shader->setmat4("view", view);
+
+    glm::mat4 projection;
+    projection = state.perspective 
+        ? glm::perspective(glm::radians(45.f), 1.f, 0.1f, 100.f)
+        : glm::ortho(0.f, state.width, 0.f, state.height, 0.1f, 100.f); 
+    shader->setmat4("projection", projection);
+    
+    auto len = sizeof(cube_positions)/sizeof(cube_positions[0]);
+    for(auto i = 0; i < len; i++) {
+        glm::mat4 model = glm::mat4(1.f);
+        model = glm::translate(model, cube_positions[i]); 
+        model = glm::rotate(model, 6 * sin(time * (i+1) /6) + i / 6.f, glm::vec3(0.5f, 1.f, 0.f));
+        shader->setmat4("model", model);
+        
+        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+    }
+}
+
+void update(Shader* shader, float time) {
+    // update_transform_fun(shader, time);
+    update_color(shader, time);
+    update_draw_transform(shader, time);
 }
 
 void render(GLFWwindow* window, Shader* shader, GLuint vao) {
@@ -139,11 +239,8 @@ void render(GLFWwindow* window, Shader* shader, GLuint vao) {
     shader->seti("tex2", 1);
     
     auto time = glfwGetTime(); 
-    update_transform(shader, time);
-    update_color(shader, time);
-
-    // glDrawArrays(GL_TRIANGLES, 0, 3);
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    update(shader, time);
+    
     glfwSwapBuffers(window);
 }
 
@@ -186,11 +283,16 @@ void render_init(GLFWwindow* window, Shader* shader, GLuint &vao) {
         -0.5f, -0.5f, 0.0f,   1.f, 0.f, 0.f,    0.f, 0.f,      
          0.5f, -0.5f, 0.0f,   0.f, 1.f, 0.f,    1.f, 0.f,
         -0.5f,  0.5f, 0.0f,   0.f, 0.f, 1.f,    0.f, 1.f,
-         0.5f,  0.5f, 0.0f,   1.f, 1.f, 1.f,    1.f, 1.f
+         0.5f,  0.5f, 0.0f,   1.f, 1.f, 1.f,    1.f, 1.f,
+         0.0f,  0.0f, 0.5f,   0.f, 0.f, 0.f,    2.f, 2.f, 
     };
     unsigned int indices[] = {
         0, 3, 2,
-        1, 3, 0
+        1, 3, 0,
+        0, 1, 4,
+        0, 2, 4,
+        2, 4, 3,
+        1, 3, 4
     };
 
     load_texture(image_path, GL_RGB, GL_TEXTURE0);
@@ -220,6 +322,7 @@ void render_init(GLFWwindow* window, Shader* shader, GLuint &vao) {
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
     glEnableVertexAttribArray(2);
 
+    glEnable(GL_DEPTH_TEST);
 
     if (verbose) {
         int nr_attributes;
@@ -236,7 +339,7 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
-    GLFWwindow* window = glfwCreateWindow(800, 800, "LearnOpenGL", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(state.width, state.height, "LearnOpenGL", NULL, NULL);
     assrt(window != NULL, "Failed to create GLFW window");
 
     glfwMakeContextCurrent(window);
@@ -254,10 +357,7 @@ int main() {
     unsigned int vao;
     render_init(window, &shader, vao);
 
-    auto frame = (input_frame) {
-        .space = 0,
-        .wireframe = false
-    };
+    auto frame = (input_frame) {  };
 
     while (!glfwWindowShouldClose(window)) { // render loop
         process_input(window, &frame);
