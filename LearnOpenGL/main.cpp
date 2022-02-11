@@ -111,13 +111,22 @@ void process_input(GLFWwindow* window, input_frame* last_frame) {
     *last_frame = new_frame; 
 }
 
-void set_color(GLuint shader_program) {
-    auto time = glfwGetTime();
+void update_color(Shader* shader, float time) {
     auto r = (sin(time * 2) / 2.f) + 0.5f;
     auto g = (sin(time) / 2.f) + 0.5f;
     auto b = (sin(time / 2) / 2.f) + 0.5f;
-    auto vert_location = glGetUniformLocation(shader_program, "prog_color");
+    auto vert_location = glGetUniformLocation(shader->ID, "prog_color");
     glUniform4f(vert_location, r, g, b, 1.0f);
+}
+
+void update_transform(Shader* shader, float time) {
+    glm::mat4 trs = glm::mat4(1.f);
+    trs = glm::rotate(trs, glm::radians(time * 200), glm::vec3(0.f, 1.f, 0.f));
+    auto scale = sin(time) / 3.f + 0.5f;
+    trs = glm::scale(trs, glm::vec3(scale, scale, scale));
+    
+    unsigned int trs_location = glGetUniformLocation(shader->ID, "trs");
+    glad_glUniformMatrix4fv(trs_location, 1, GL_FALSE, glm::value_ptr(trs));
 }
 
 void render(GLFWwindow* window, Shader* shader, GLuint vao) {
@@ -128,7 +137,11 @@ void render(GLFWwindow* window, Shader* shader, GLuint vao) {
     shader->use();
     shader->seti("tex", 0);
     shader->seti("tex2", 1);
-    // set_color(shader_program);
+    
+    auto time = glfwGetTime(); 
+    update_transform(shader, time);
+    update_color(shader, time);
+
     // glDrawArrays(GL_TRIANGLES, 0, 3);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
     glfwSwapBuffers(window);
