@@ -10,13 +10,21 @@
 #include "assrt.h"
 #include "shader.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image/stb_image.h"
+
 bool verbose = true;
 
+const char* vert_path = "data/shaders/shader.vert";
+const char* frag_path = "data/shaders/shader.frag";
+const char* image_path = "data/images/container.jpeg";
+const char* image2_path = "data/images/awesomeface.png";
+
 static void gl_debug_messenger([[maybe_unused]] GLenum source, GLenum type,
-    [[maybe_unused]] GLuint id, GLenum severity,
-    [[maybe_unused]] GLsizei length,
-    const GLchar* message,
-    [[maybe_unused]] const void* user_param) {
+        [[maybe_unused]] GLuint id, GLenum severity,
+        [[maybe_unused]] GLsizei length,
+        const GLchar* message,
+        [[maybe_unused]] const void* user_param) {
 
     const char* type_str = nullptr;
     switch (type) {
@@ -118,24 +126,62 @@ void render(GLFWwindow* window, Shader* shader, GLuint vao) {
 
     glBindVertexArray(vao);
     shader->use();
+    shader->seti("tex", 0);
+    shader->seti("tex2", 1);
     // set_color(shader_program);
     // glDrawArrays(GL_TRIANGLES, 0, 3);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
     glfwSwapBuffers(window);
 }
 
+void load_texture(const char* path, GLenum image_format, GLenum active_texture) {
+    // texture wrapping config
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRROR_CLAMP_TO_EDGE); 
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_MIRROR_CLAMP_TO_EDGE);
+
+    // filtering mode
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    // same but mipmaps
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    // magnification wouldn't need (can't) mipmap interpolation
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    int width, height, number_of_color_channels;
+
+    stbi_set_flip_vertically_on_load(true);
+    unsigned char* data = stbi_load(path, &width, &height, &number_of_color_channels, 0);
+
+    assrt(data, "Failed to load texture {%s}", path);
+
+    unsigned int texture;
+    glGenTextures(1, &texture);
+    glActiveTexture(active_texture); 
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, image_format, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    
+    stbi_image_free(data);
+}
+
 void render_init(GLFWwindow* window, Shader* shader, GLuint &vao) {
     float vertices[] = {
-        // positions          // colors
-        -0.5f, -0.5f, 0.0f,   1.f, 0.f, 0.f,
-         0.5f, -0.5f, 0.0f,   0.f, 1.f, 0.f,
-        -0.5f,  0.5f, 0.0f,   0.f, 0.f, 1.f,
-         0.5f,  0.5f, 0.0f,   1.f, 1.f, 1.f
+        // positions          //colors          // texture coordinates
+        -0.5f, -0.5f, 0.0f,   1.f, 0.f, 0.f,    0.f, 0.f,      
+         0.5f, -0.5f, 0.0f,   0.f, 1.f, 0.f,    1.f, 0.f,
+        -0.5f,  0.5f, 0.0f,   0.f, 0.f, 1.f,    0.f, 1.f,
+         0.5f,  0.5f, 0.0f,   1.f, 1.f, 1.f,    1.f, 1.f
     };
     unsigned int indices[] = {
         0, 3, 2,
         1, 3, 0
     };
+
+    load_texture(image_path, GL_RGB, GL_TEXTURE0);
+    load_texture(image2_path, GL_RGBA, GL_TEXTURE1);
 
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
@@ -150,14 +196,17 @@ void render_init(GLFWwindow* window, Shader* shader, GLuint &vao) {
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
    
-    shader->configure("shaders/shader.vs", "shaders/shader.fs");
+    shader->configure(vert_path, frag_path);
     if (verbose) printf("Using shader {%d}\n", shader->ID);
    
     // intepret the vertex data (per vertex attribute)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+
 
     if (verbose) {
         int nr_attributes;
