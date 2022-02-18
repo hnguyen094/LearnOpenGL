@@ -8,7 +8,12 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "assrt.h"
+#include "glm/common.hpp"
+#include "glm/ext/matrix_transform.hpp"
+#include "glm/ext/quaternion_transform.hpp"
 #include "glm/fwd.hpp"
+#include "glm/geometric.hpp"
+#include "glm/gtc/quaternion.hpp"
 #include "shader.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -21,21 +26,50 @@ const char* frag_path = "data/shaders/shader.frag";
 const char* image_path = "data/images/container.jpeg";
 const char* image2_path = "data/images/awesomeface.png";
 
+struct input_frame {
+    int space;
+    int p;
+    int w,a,s,d,q,e;
+    int l_mouse, r_mouse;
+
+    // mouse
+    glm::vec2 mouse_xy;
+    glm::vec2 mouse_delta;
+};
+
 struct program_state {
+    // options
     bool wireframe;
     bool perspective;
 
+    float camera_speed;
+    float mouse_sens;
+    float fov;
+
     float width;
     float height;
-    glm::vec3 world_offset;
+
+    // camera
+    glm::vec3 camera_position;
+    glm::quat camera_rotation;
+
+    // timings
+    float dT;
+    float last_frame_time;
+
+    // input
+    input_frame last_input_frame;
 };
 
 program_state state = (program_state) {
     .perspective = true,
     .wireframe = false,
+    .camera_speed = 10,
+    .mouse_sens = 0.1f,
+    .fov = 45.f,
     .width = 800,
     .height = 800,
-    .world_offset = glm::vec3(0.f, 0.f, -0.3f),
+    .camera_position = glm::vec3(0.f, 0.f, -0.3f),
 };
 
 static void gl_debug_messenger([[maybe_unused]] GLenum source, GLenum type,
@@ -106,28 +140,54 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     if (verbose) printf("GLFW: Resized to : (%d, %d)\n", width, height); 
 }
 
-struct input_frame {
-    int space;
-    int p;
-    int w,a,s,d,q,e;
-};
-
-
 void verbose_toggle(const char* var_name, bool var_value) {
     if (verbose) printf("%s: {%s}\n", var_name, (var_value ? "ON" : "OFF"));
 }
 
+glm::vec3 position_delta_with_rotation(glm::vec3 input_direction) {
+    return state.dT * state.camera_speed * input_direction * state.camera_rotation; 
+}
+
+void process_mouse_input(GLFWwindow* window, double x, double y) {
+    x *= state.mouse_sens;
+    y *= -state.mouse_sens;
+    auto xy = glm::vec2(x, y);
+    auto delta = xy - state.last_input_frame.mouse_xy;
+    delta = 0.1f * delta;
+    auto up = glm::vec3(0, 1, 0);
+   
+    if (state.last_input_frame.r_mouse == GLFW_PRESS) {
+        auto direction = glm::vec3(
+                cos(glm::radians(x)) * cos(glm::radians(y)),
+                sin(glm::radians(y)),
+                sin(glm::radians(x)) * cos(glm::radians(y))
+                );
+        state.camera_rotation = glm::inverse(glm::quatLookAt(direction, up));
+    }
+    state.last_input_frame.mouse_delta = delta; 
+    state.last_input_frame.mouse_xy = xy;
+}
+
+void process_scroll_input(GLFWwindow* window, double x, double y) {
+    state.fov -= (float)y;
+    state.fov = glm::clamp(state.fov, 1.f, 100.f);
+    if (verbose) printf("New FOV: {%f}\n" , state.fov);
+}
+
 void process_input(GLFWwindow* window, input_frame* last_frame) {
-    auto new_frame = (input_frame) {
-        .space = glfwGetKey(window, GLFW_KEY_SPACE),
-        .p = glfwGetKey(window, GLFW_KEY_P),
-        .w = glfwGetKey(window, GLFW_KEY_W),
-        .a = glfwGetKey(window, GLFW_KEY_A),
-        .s = glfwGetKey(window, GLFW_KEY_S),
-        .d = glfwGetKey(window, GLFW_KEY_D),
-        .q = glfwGetKey(window, GLFW_KEY_Q),
-        .e = glfwGetKey(window, GLFW_KEY_E),
-    };
+    auto new_frame = *last_frame;
+    
+    new_frame.space = glfwGetKey(window, GLFW_KEY_SPACE);
+    new_frame.p = glfwGetKey(window, GLFW_KEY_P);
+    new_frame.w = glfwGetKey(window, GLFW_KEY_W);
+    new_frame.a = glfwGetKey(window, GLFW_KEY_A);
+    new_frame.s = glfwGetKey(window, GLFW_KEY_S);
+    new_frame.d = glfwGetKey(window, GLFW_KEY_D);
+    new_frame.q = glfwGetKey(window, GLFW_KEY_Q);
+    new_frame.e = glfwGetKey(window, GLFW_KEY_E);
+
+    new_frame.r_mouse =  glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
+    new_frame.l_mouse =  glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
 
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) { 
         glfwSetWindowShouldClose(window, true);
@@ -149,24 +209,23 @@ void process_input(GLFWwindow* window, input_frame* last_frame) {
     }
 
     if (new_frame.w == GLFW_PRESS) {
-        state.world_offset = state.world_offset + glm::vec3(0, 0, 0.1f);
+        state.camera_position += position_delta_with_rotation(glm::vec3(0, 0, -1));
     }
     if (new_frame.a == GLFW_PRESS) {
-        state.world_offset = state.world_offset + glm::vec3(0.1f, 0, 0);
+        state.camera_position += position_delta_with_rotation(glm::vec3(-1, 0, 0));
     }
     if (new_frame.s == GLFW_PRESS) {
-        state.world_offset = state.world_offset + glm::vec3(0, 0, -0.1f);
+        state.camera_position += position_delta_with_rotation(glm::vec3(0, 0, 1));
     }
     if (new_frame.d == GLFW_PRESS) {
-        state.world_offset = state.world_offset + glm::vec3(-0.1f, 0, 0);
+        state.camera_position += position_delta_with_rotation(glm::vec3(1, 0, 0));
     }
     if (new_frame.q == GLFW_PRESS) {
-        state.world_offset = state.world_offset + glm::vec3(0, 0.1f, 0);
+        state.camera_position += position_delta_with_rotation(glm::vec3(0, -1, 0));
     }
     if (new_frame.e == GLFW_PRESS) {
-        state.world_offset = state.world_offset + glm::vec3(0, -0.1f, 0);
+        state.camera_position += position_delta_with_rotation(glm::vec3(0, 1, 0));
     }
-
     *last_frame = new_frame; 
 }
 
@@ -175,17 +234,8 @@ void update_color(Shader* shader, float time) {
     auto g = (sin(time) / 2.f) + 0.5f;
     auto b = (sin(time / 2) / 2.f) + 0.5f;
     auto vert_location = glGetUniformLocation(shader->ID, "prog_color");
-    glUniform4f(vert_location, r, g, b, 1.0f);
-}
-
-void update_transform_fun(Shader* shader, float time) {
-    glm::mat4 trs = glm::mat4(1.f);
-    trs = glm::rotate(trs, glm::radians(time * 200), glm::vec3(0.f, 1.f, 0.f));
-    auto scale = sin(time) / 3.f + 0.5f;
-    trs = glm::scale(trs, glm::vec3(scale, scale, scale));
-    
-    unsigned int trs_location = glGetUniformLocation(shader->ID, "trs");
-    glUniformMatrix4fv(trs_location, 1, GL_FALSE, glm::value_ptr(trs));
+    // glUniform4f(vert_location, r, g, b, 1.0f);
+    glUniform4f(vert_location, 1.f, 1.f, 1.f, 1.0f);
 }
 
 void update_draw_transform(Shader* shader, float time) {
@@ -203,29 +253,38 @@ void update_draw_transform(Shader* shader, float time) {
     };
 
     glm::mat4 view = glm::mat4(1.0f);
-    view = glm::translate(view, state.world_offset); 
+    view = glm::mat4_cast(state.camera_rotation) * view;
+    view = glm::translate(view, -state.camera_position); 
+
     shader->setmat4("view", view);
 
     glm::mat4 projection;
+    auto ortho_fov = state.fov / 45.f / 2.f;
     projection = state.perspective 
-        ? glm::perspective(glm::radians(45.f), 1.f, 0.1f, 100.f)
-        : glm::ortho(0.f, state.width, 0.f, state.height, 0.1f, 100.f); 
+        ? glm::perspective(glm::radians(state.fov), 1.f, 0.1f, 100.f)
+        : glm::ortho(-ortho_fov, ortho_fov, -ortho_fov, ortho_fov, 0.1f, 100.f); 
     shader->setmat4("projection", projection);
     
     auto len = sizeof(cube_positions)/sizeof(cube_positions[0]);
     for(auto i = 0; i < len; i++) {
         glm::mat4 model = glm::mat4(1.f);
         model = glm::translate(model, cube_positions[i]); 
-        model = glm::rotate(model, 6 * sin(time * (i+1) /6) + i / 6.f, glm::vec3(0.5f, 1.f, 0.f));
+        // model = glm::rotate(model, 6 * sin(time * (i+1) /6) + i / 6.f, glm::vec3(0.5f, 1.f, 0.f));
         shader->setmat4("model", model);
         
         glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
     }
 }
 
+void update_camera(float time) {
+    auto direction = glm::normalize(-state.camera_position);
+    auto up = glm::vec3(0, 1, 0);
+    state.camera_rotation = glm::inverse(glm::quatLookAt(direction, up));
+}
+
 void update(Shader* shader, float time) {
-    // update_transform_fun(shader, time);
     update_color(shader, time);
+    // update_camera(time);
     update_draw_transform(shader, time);
 }
 
@@ -238,8 +297,10 @@ void render(GLFWwindow* window, Shader* shader, GLuint vao) {
     shader->seti("tex", 0);
     shader->seti("tex2", 1);
     
-    auto time = glfwGetTime(); 
-    update(shader, time);
+    auto time = glfwGetTime();
+    state.dT = time - state.last_frame_time;
+    update(shader, time); 
+    state.last_frame_time = time;
     
     glfwSwapBuffers(window);
 }
@@ -342,10 +403,15 @@ int main() {
     GLFWwindow* window = glfwCreateWindow(state.width, state.height, "LearnOpenGL", NULL, NULL);
     assrt(window != NULL, "Failed to create GLFW window");
 
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);  
+    
     glfwMakeContextCurrent(window);
     assrt(gladLoadGLLoader((GLADloadproc)glfwGetProcAddress), "Failed to initialize GLAD");
 
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    glfwSetCursorPosCallback(window, process_mouse_input);
+    glfwSetScrollCallback(window, process_scroll_input);
 
     if (GLAD_GL_KHR_debug) {
         glDebugMessageCallback(gl_debug_messenger, nullptr);
@@ -357,10 +423,8 @@ int main() {
     unsigned int vao;
     render_init(window, &shader, vao);
 
-    auto frame = (input_frame) {  };
-
     while (!glfwWindowShouldClose(window)) { // render loop
-        process_input(window, &frame);
+        process_input(window, &state.last_input_frame);
         render(window, &shader, vao);
         glfwPollEvents();
         auto error = glGetError();
